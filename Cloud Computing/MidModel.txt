@@ -1,0 +1,116 @@
+3 VM need to clone 1st one
+
+sudo apt update
+1.sudo apt install nginx -y
+2,3.sudo apt install apache2
+============================
+in VM1
+cd /etc/nginx
+ls
+=========================
+sudo apt install gedit -y
+sudo gedit nginx.conf
+=====================
+
+
+http{
+	###basic settings
+        ###
+	upstream backend{
+	server 192.168.202.129
+	server 192.168.202.130
+	}
+
+}
+
+ip a
+inet of 2,3 vm are stored
+
+==========================
+in 1st vm
+cd sites-available
+
+sudo gedit default
+
+at location
+proxy_pass http://backend;
+proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+
+================================
+in 2nd,3rd 
+/var/www/html/ open with text editor
+
+index.html 
+change the head content to VM2,VM3
+=================================
+in vm1
+sudo systemctl enable nginx
+sudo systemctl start nginx
+===========================
+in vm2,vm3
+sudo systemctl enable apache2
+sudo systemctl start apache2
+
+
+============================
+task.py
+from datetime import datetime
+print(datetime.now())
+
+=========================
+script.sh 	
+#! /bin/bash
+
+cd /home/ubuntu/output
+
+python3 task.py >> output.txt
+
+===========================
+sudo chmod +x script.sh
+crontab -e
+
+press 1
+go to the last line
+* * * * *  /home/ubuntu/output/script.sh
+ctrl+X 
+Y 
+watch cat output.txt
+=========================
+🔑 What this code does
+
+This code simulates a Token Ring algorithm for distributed mutual exclusion.
+
+Processes (nodes) are connected in a ring topology.
+
+Only the process holding the token can enter the Critical Section (CS).
+
+After finishing, the node passes the token to the next node in the ring.
+
+This ensures that only one process can access the shared resource at a time.
+
+================================
+
+CCA
+The coordinator ensures mutual exclusion - only one client can be in the critical section at a time, with fair FIFO queuing for multiple requests.
+
+MPS
+
+A Critical Section is a part of a program where a process (or thread) accesses shared resources (like a file, database, or variable) that must not be accessed by more than one process at the same time.
+This code makes 3 processes coordinate to safely enter a shared resource (Critical Section) using Ricart–Agrawala algorithm:
+
+Before entering, each node asks permission from others.
+
+Others reply if they are not using it or if their request is later.
+
+Only when it has all permissions, it enters CS.
+
+After leaving, it replies to all pending requests.
+
+=======================================
+- It’s a tiny RMI demo using Pyro4: a remote `Calculator` object is exposed by a server, and a client calls its methods over the network.
+
+What each file does
+- `calc.py`: Defines and exposes `Calculator` via `@Pyro4.expose` with `add`, `sub`, `mul`, `div` (division returns a message on error).
+- `server.py`: Starts a Pyro4 daemon, registers `Calculator`, and registers it in the name server under `ex2.calculator`, then serves requests.
+- `client.py`: Looks up `ex2.calculator` in the name server, creates a `Pyro4.Proxy`, and invokes `add/sub/mul/div` on 10 and 12.
+
